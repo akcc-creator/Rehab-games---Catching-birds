@@ -1,0 +1,74 @@
+
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0" />
+    <title>空中捉雀鳥 🦅 豪華終極版</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@19.0.0",
+    "react-dom": "https://esm.sh/react-dom@19.0.0",
+    "react-dom/client": "https://esm.sh/react-dom@19.0.0/client",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react/": "https://esm.sh/react@^19.2.3/"
+  }
+}
+</script>
+
+    <style>
+        body, html {
+            margin: 0; padding: 0; overflow: hidden;
+            width: 100%; height: 100%;
+            background-color: #000; /* 背景改黑，因為 canvas 會 zoom out */
+            user-select: none; -webkit-user-select: none;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        /* Zoom out fix: 確保 Canvas 保持比例並完整顯示 */
+        canvas { 
+            display: block;
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain; 
+            box-shadow: 0 0 40px rgba(0,0,0,0.5);
+            background: #03A9F4; /* 預設天空藍 */
+        }
+        #root {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        @keyframes complex-shake {
+            0% { transform: translate(0, 0) rotate(0deg); }
+            10% { transform: translate(-8px, -4px) rotate(-1.5deg); }
+            20% { transform: translate(6px, 4px) rotate(1.5deg); }
+            30% { transform: translate(-8px, 4px) rotate(-1.5deg); }
+            40% { transform: translate(6px, -4px) rotate(1.5deg); }
+            50% { transform: translate(-4px, 4px) rotate(-1deg); }
+            100% { transform: translate(0, 0) rotate(0deg); }
+        }
+        .shake-active { animation: complex-shake 0.5s cubic-bezier(.36,.07,.19,.97) both; }
+        input[type=range] { -webkit-appearance: none; background: transparent; }
+        input[type=range]::-webkit-slider-runnable-track { width: 100%; height: 12px; background: #e2e8f0; border-radius: 10px; }
+        input[type=range]::-webkit-slider-thumb { 
+            -webkit-appearance: none; height: 32px; width: 32px; border-radius: 50%; 
+            background: #0ea5e9; cursor: pointer; margin-top: -10px; 
+            box-shadow: 0 4px 6px rgb(0 0 0 / 0.2); border: 3px solid white; 
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module" src="./index.tsx"></script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+{
+  "name": "空中捉雀鳥",
+  "description": "體感控制遊戲：利用鏡頭偵測手部動作捕捉飛鳥，避開炸彈。",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
