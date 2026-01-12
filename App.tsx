@@ -9,15 +9,16 @@ const CANVAS_WIDTH = 1280;
 const CANVAS_HEIGHT = 720;
 const OBJECT_RADIUS = 40;
 
-// 穩定追蹤 7.0 參數 (Refined for maximum stability)
-const PERSISTENCE_FRAMES = 20; 
-const MAX_MATCH_DIST = 350; 
-const GRACE_PERIOD = 5;
+// 穩定追蹤參數 (針對 iPad/Mobile 優化)
+// iPad 運算較慢，需要更長的緩衝期才不會讓手閃爍
+const PERSISTENCE_FRAMES = 40; // 增加：允許更多幀數遺失而不消失
+const MAX_MATCH_DIST = 400; // 增加：允許手部移動得更快
+const GRACE_PERIOD = 8; // 增加：剛遺失時保持完全不透明的時間
 
 // Adaptive Smoothing Parameters
-const MIN_SMOOTHING = 0.15; // 靜止時非常平滑 (抗抖動)
-const MAX_SMOOTHING = 0.8;  // 移動時反應靈敏 (低延遲)
-const STABILITY_THRESHOLD = 3; // 需要連續偵測多少幀才算穩定出現
+const MIN_SMOOTHING = 0.15; 
+const MAX_SMOOTHING = 0.8;  
+const STABILITY_THRESHOLD = 1; // 修改：降低門檻，設為 1 代表一偵測到馬上顯示，解決 iPad 手掌消失問題
 
 const BIRD_EMOJIS = ['🦅', '🕊️', '🐦', '🦉', '🦜']; 
 
@@ -25,7 +26,7 @@ interface TrackedHand extends HandData {
   id: number;
   alpha: number;
   framesMissing: number;
-  framesDetected: number; // 新增：用於計算穩定度，防止閃爍
+  framesDetected: number;
   vx: number;
   vy: number;
 }
@@ -48,7 +49,6 @@ export default function App() {
   const isPlayingRef = useRef(false);
   const isPausedRef = useRef(false);
   
-  // UPDATED DEFAULTS: Speed 1.0, Density 1.2
   const [speedFactor, setSpeedFactor] = useState(1.0); 
   const [spawnFreq, setSpawnFreq] = useState(1.2);
   const [highScore, setHighScore] = useState(0);
@@ -71,15 +71,20 @@ export default function App() {
       try {
         console.log("正在請求相機權限...");
         const stream = await navigator.mediaDevices.getUserMedia({ 
-          video: { width: 1280, height: 720, facingMode: "user" },
+          video: { 
+            width: { ideal: 1280 }, 
+            height: { ideal: 720 }, 
+            facingMode: "user" // 強制使用前置鏡頭
+          },
           audio: false 
         });
         
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
+          // iOS Safari 需要 playsInline 才能在頁面內播放，且需要明確調用 play()
           videoRef.current.onloadedmetadata = () => {
              console.log("相機已啟動");
-             videoRef.current?.play();
+             videoRef.current?.play().catch(e => console.error("Video play failed:", e));
           };
         }
         
@@ -227,7 +232,7 @@ export default function App() {
       obj.y -= obj.speedY; obj.x += obj.speedX;
       if (!obj.caught) {
         for (const hand of trackedHandsRef.current) {
-            // Stability Check: 只有當手部穩定偵測超過閾值時才允許互動
+            // Stability Check: 只要有偵測到就允許互動
             if (hand.framesDetected < STABILITY_THRESHOLD) continue;
             
             // 判定範圍調整
@@ -333,11 +338,12 @@ export default function App() {
 
     // 6. 手掌 (縮小一倍)
     trackedHandsRef.current.forEach(h => {
-      // 根據穩定度 (framesDetected) 慢慢顯示手掌，避免閃爍
-      const entryOpacity = Math.min(1, h.framesDetected / 4);
+      // 在 iPad 上，放寬顯示條件
+      // 只要有一點點 alpha 就顯示，不要等到 framesDetected 很高
+      const entryOpacity = Math.min(1, h.framesDetected / 2); // 修改：只要 2 幀就全顯
       const finalOpacity = h.alpha * entryOpacity;
 
-      if (finalOpacity <= 0.05) return;
+      if (finalOpacity <= 0.01) return; // 修改：降低顯示門檻
       ctx.save();
       ctx.globalAlpha = finalOpacity;
       
@@ -380,7 +386,7 @@ export default function App() {
 
     // 1. 更新現有手掌
     trackedHandsRef.current.forEach(hand => {
-      // 預測位置 (加上阻尼，避免過度預測)
+      // 預測位置
       const predX = hand.x + hand.vx * 0.8;
       const predY = hand.y + hand.vy * 0.8;
 
@@ -392,7 +398,6 @@ export default function App() {
         if (usedDetections.has(idx)) return;
         const d = Math.sqrt(Math.pow(det.x - predX, 2) + Math.pow(det.y - predY, 2));
         
-        // 優先匹配同側手 (Distance penalty if sides don't match)
         const sideBonus = (hand.side === det.side) ? 0.6 : 1.0; 
         const weightedDist = d * sideBonus;
 
@@ -407,13 +412,8 @@ export default function App() {
         const det = detections[bestIdx]; 
         usedDetections.add(bestIdx);
         
-        // 自適應平滑 (Adaptive Smoothing)
-        // 計算移動距離
+        // 自適應平滑
         const moveDist = Math.sqrt(Math.pow(det.x - hand.x, 2) + Math.pow(det.y - hand.y, 2));
-        
-        // 動態 Alpha 計算:
-        // 距離小 (靜止/慢動) -> Alpha 小 (強平滑) -> 消除抖動
-        // 距離大 (快動) -> Alpha 大 (弱平滑) -> 減少延遲
         const adaptiveAlpha = MIN_SMOOTHING + (Math.min(moveDist, 150) / 150) * (MAX_SMOOTHING - MIN_SMOOTHING);
 
         const smoothX = hand.x + (det.x - hand.x) * adaptiveAlpha;
@@ -423,25 +423,26 @@ export default function App() {
           ...hand, 
           x: smoothX, 
           y: smoothY,
-          vx: smoothX - hand.x, // 計算瞬時速度
+          vx: smoothX - hand.x,
           vy: smoothY - hand.y,
           framesMissing: 0, 
           alpha: 1.0, 
-          framesDetected: hand.framesDetected + 1, // 增加穩定度計數
+          framesDetected: hand.framesDetected + 1,
           side: det.side
         });
       } else if (hand.framesMissing < PERSISTENCE_FRAMES) {
-        // 遺失追蹤：使用慣性預測，但會慢慢停下來 (Damping)
+        // 遺失追蹤
         const damping = 0.9;
         const nextVx = hand.vx * damping;
         const nextVy = hand.vy * damping;
         
         const nextFramesMissing = hand.framesMissing + 1;
         
-        // Grace Period: 剛遺失時不馬上變透明
+        // Grace Period 
         let newAlpha = hand.alpha;
         if (nextFramesMissing > GRACE_PERIOD) {
-           newAlpha = Math.max(0, hand.alpha - 0.1); // 慢慢淡出
+           // 修改：在 iPad 上降低淡出速度，避免閃爍
+           newAlpha = Math.max(0, hand.alpha - 0.05); 
         }
 
         nextHands.push({
@@ -451,7 +452,7 @@ export default function App() {
           vx: nextVx, 
           vy: nextVy,
           framesMissing: nextFramesMissing, 
-          framesDetected: hand.framesDetected, // 保持穩定度計數
+          framesDetected: hand.framesDetected,
           alpha: newAlpha
         });
       }
@@ -469,7 +470,7 @@ export default function App() {
           side: det.side, 
           alpha: 1.0, 
           framesMissing: 0,
-          framesDetected: 1 // 初始穩定度為 1
+          framesDetected: 1 
         });
       }
     });
@@ -508,7 +509,15 @@ export default function App() {
 
   return (
     <div className="relative w-full h-full flex items-center justify-center overflow-hidden bg-black">
-      <video ref={videoRef} className="absolute opacity-0" playsInline muted autoPlay />
+      {/* 修改：Video 標籤加入 playsInline 並設定寬高，確保 iOS 正確渲染 */}
+      <video 
+        ref={videoRef} 
+        className="absolute" 
+        style={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT, opacity: 0.001, pointerEvents: 'none' }}
+        playsInline 
+        muted 
+        autoPlay 
+      />
       <div className={`relative w-full h-full flex items-center justify-center ${isShaking ? 'shake-active' : ''}`}>
         <canvas ref={canvasRef} width={CANVAS_WIDTH} height={CANVAS_HEIGHT} />
       </div>
