@@ -90,8 +90,8 @@ export default function App() {
         clouds.push({
             x: Math.random() * CANVAS_WIDTH,
             y: Math.random() * (CANVAS_HEIGHT / 2),
-            speed: 0.2 + Math.random() * 0.4,
-            scale: 0.5 + Math.random() * 1.0,
+            speed: 0.4 + Math.random() * 1.0,
+            scale: 0.8 + Math.random() * 1.5,
             opacity: 0.4 + Math.random() * 0.4
         });
     }
