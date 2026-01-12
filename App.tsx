@@ -48,8 +48,9 @@ export default function App() {
   const isPlayingRef = useRef(false);
   const isPausedRef = useRef(false);
   
-  const [speedFactor, setSpeedFactor] = useState(0.4); 
-  const [spawnFreq, setSpawnFreq] = useState(1.0);
+  // UPDATED DEFAULTS: Speed 1.0, Density 1.2
+  const [speedFactor, setSpeedFactor] = useState(1.0); 
+  const [spawnFreq, setSpawnFreq] = useState(1.2);
   const [highScore, setHighScore] = useState(0);
   const [initialLives, setInitialLives] = useState(5);
 
@@ -58,6 +59,7 @@ export default function App() {
   });
   const [trackerReady, setTrackerReady] = useState(false);
   const [isShaking, setIsShaking] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     const savedScore = localStorage.getItem('SKY_CATCH_HIGHSCORE');
@@ -67,18 +69,37 @@ export default function App() {
 
     async function setup() {
       try {
+        console.log("正在請求相機權限...");
         const stream = await navigator.mediaDevices.getUserMedia({ 
           video: { width: 1280, height: 720, facingMode: "user" },
           audio: false 
         });
+        
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
-          videoRef.current.onloadedmetadata = () => videoRef.current?.play();
+          videoRef.current.onloadedmetadata = () => {
+             console.log("相機已啟動");
+             videoRef.current?.play();
+          };
         }
+        
+        console.log("正在初始化 AI 模型...");
         const success = await handTrackingService.initialize();
-        setTrackerReady(success);
-      } catch (err) {
+        if (success) {
+            console.log("AI 模型準備完成");
+            setTrackerReady(true);
+        } else {
+            setErrorMessage("AI 模型載入失敗，請檢查網路連線");
+        }
+      } catch (err: any) {
         console.error("啟動失敗:", err);
+        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+            setErrorMessage("請允許使用相機權限以進行遊戲 📷");
+        } else if (err.name === 'NotFoundError') {
+             setErrorMessage("找不到相機裝置 📷");
+        } else {
+            setErrorMessage(`初始化錯誤: ${err.message}`);
+        }
       }
     }
     setup();
@@ -90,8 +111,8 @@ export default function App() {
         clouds.push({
             x: Math.random() * CANVAS_WIDTH,
             y: Math.random() * (CANVAS_HEIGHT / 2),
-            speed: 0.4 + Math.random() * 1.0,
-            scale: 0.8 + Math.random() * 1.5,
+            speed: 0.2 + Math.random() * 0.4,
+            scale: 0.5 + Math.random() * 1.0,
             opacity: 0.4 + Math.random() * 0.4
         });
     }
@@ -471,6 +492,20 @@ export default function App() {
     return () => { if (requestRef.current) cancelAnimationFrame(requestRef.current); audioService.stopMusic(); };
   }, [loop]);
 
+  // 如果有錯誤，顯示錯誤畫面而不是全黑
+  if (errorMessage) {
+      return (
+          <div className="w-full h-full flex flex-col items-center justify-center bg-zinc-900 text-white p-6 text-center z-50">
+              <div className="text-6xl mb-4">⚠️</div>
+              <h1 className="text-3xl font-bold mb-2">無法啟動遊戲</h1>
+              <p className="text-xl text-zinc-400 max-w-md">{errorMessage}</p>
+              <button onClick={() => window.location.reload()} className="mt-8 px-8 py-3 bg-blue-600 rounded-full font-bold hover:bg-blue-500 transition-colors shadow-lg">
+                  重新整理頁面
+              </button>
+          </div>
+      );
+  }
+
   return (
     <div className="relative w-full h-full flex items-center justify-center overflow-hidden bg-black">
       <video ref={videoRef} className="absolute opacity-0" playsInline muted autoPlay />
@@ -520,7 +555,7 @@ export default function App() {
             <button onClick={startGame} className="w-full bg-sky-500 hover:bg-sky-600 text-white py-6 rounded-[30px] text-4xl font-black shadow-xl active:scale-95 transition-all mb-4">
                 {gameState.gameOver ? '再試一次' : '開始飛行'}
             </button>
-            {!trackerReady && <p className="mt-6 text-sky-400 font-bold animate-pulse text-xl">⚡ 系統準備中...</p>}
+            {!trackerReady && !errorMessage && <p className="mt-6 text-sky-400 font-bold animate-pulse text-xl">⚡ 系統準備中... (請允許相機)</p>}
           </div>
         </div>
       )}
