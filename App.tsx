@@ -10,15 +10,14 @@ const CANVAS_HEIGHT = 720;
 const OBJECT_RADIUS = 40;
 
 // 穩定追蹤參數 (針對 iPad/Mobile 優化)
-// iPad 運算較慢，需要更長的緩衝期才不會讓手閃爍
-const PERSISTENCE_FRAMES = 40; // 增加：允許更多幀數遺失而不消失
-const MAX_MATCH_DIST = 400; // 增加：允許手部移動得更快
-const GRACE_PERIOD = 8; // 增加：剛遺失時保持完全不透明的時間
+const PERSISTENCE_FRAMES = 40; 
+const MAX_MATCH_DIST = 400; 
+const GRACE_PERIOD = 8; 
 
 // Adaptive Smoothing Parameters
 const MIN_SMOOTHING = 0.15; 
 const MAX_SMOOTHING = 0.8;  
-const STABILITY_THRESHOLD = 1; // 修改：降低門檻，設為 1 代表一偵測到馬上顯示，解決 iPad 手掌消失問題
+const STABILITY_THRESHOLD = 1;
 
 const BIRD_EMOJIS = ['🦅', '🕊️', '🐦', '🦉', '🦜']; 
 
@@ -74,14 +73,13 @@ export default function App() {
           video: { 
             width: { ideal: 1280 }, 
             height: { ideal: 720 }, 
-            facingMode: "user" // 強制使用前置鏡頭
+            facingMode: "user" 
           },
           audio: false 
         });
         
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
-          // iOS Safari 需要 playsInline 才能在頁面內播放，且需要明確調用 play()
           videoRef.current.onloadedmetadata = () => {
              console.log("相機已啟動");
              videoRef.current?.play().catch(e => console.error("Video play failed:", e));
@@ -219,7 +217,6 @@ export default function App() {
       });
     }
 
-    // 更新雲朵位置
     cloudsRef.current.forEach(cloud => {
         cloud.x += cloud.speed;
         if (cloud.x > CANVAS_WIDTH + 100) {
@@ -232,10 +229,8 @@ export default function App() {
       obj.y -= obj.speedY; obj.x += obj.speedX;
       if (!obj.caught) {
         for (const hand of trackedHandsRef.current) {
-            // Stability Check: 只要有偵測到就允許互動
             if (hand.framesDetected < STABILITY_THRESHOLD) continue;
             
-            // 判定範圍調整
             const dx = hand.x - obj.x; const dy = hand.y - obj.y;
             if (Math.sqrt(dx * dx + dy * dy) < obj.radius + 60) {
                 obj.caught = true;
@@ -288,19 +283,18 @@ export default function App() {
 
     // 3. 多層次山景
     ctx.save();
-    // 遠山
     ctx.fillStyle = "#C8E6C9"; 
     ctx.beginPath(); ctx.moveTo(0, CANVAS_HEIGHT); ctx.lineTo(0, CANVAS_HEIGHT - 150);
     ctx.bezierCurveTo(200, CANVAS_HEIGHT - 250, 500, CANVAS_HEIGHT - 50, 700, CANVAS_HEIGHT - 200);
     ctx.bezierCurveTo(900, CANVAS_HEIGHT - 350, 1200, CANVAS_HEIGHT - 100, 1280, CANVAS_HEIGHT - 180);
     ctx.lineTo(1280, CANVAS_HEIGHT); ctx.fill();
-    // 中山
+
     ctx.fillStyle = "#81C784";
     ctx.beginPath(); ctx.moveTo(0, CANVAS_HEIGHT); ctx.lineTo(0, CANVAS_HEIGHT - 100);
     ctx.bezierCurveTo(300, CANVAS_HEIGHT - 200, 600, CANVAS_HEIGHT - 150, 900, CANVAS_HEIGHT - 250);
     ctx.bezierCurveTo(1100, CANVAS_HEIGHT - 300, 1280, CANVAS_HEIGHT - 150, 1280, CANVAS_HEIGHT);
     ctx.fill();
-    // 近山
+
     ctx.fillStyle = "#43A047"; 
     ctx.beginPath(); ctx.moveTo(0, CANVAS_HEIGHT); ctx.lineTo(0, CANVAS_HEIGHT - 220);
     ctx.bezierCurveTo(300, CANVAS_HEIGHT - 380, 600, CANVAS_HEIGHT - 200, 900, CANVAS_HEIGHT - 350);
@@ -321,7 +315,11 @@ export default function App() {
           scaleX = 1 + pulse; scaleY = 1 + pulse;
       }
       ctx.translate(obj.x, obj.y); ctx.rotate(rotation); ctx.scale(scaleX, scaleY);
-      ctx.font = '80px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      
+      // 關鍵修正：iOS Emoji 渲染修復
+      ctx.fillStyle = '#000000'; // 強制重設為黑色，防止使用漸變色填滿 Emoji
+      ctx.font = '80px "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", Arial'; 
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(obj.emoji, 0, 0);
       ctx.restore();
     });
@@ -336,14 +334,12 @@ export default function App() {
       ctx.fillText(t.text, t.x, t.y); ctx.restore();
     });
 
-    // 6. 手掌 (縮小一倍)
+    // 6. 手掌
     trackedHandsRef.current.forEach(h => {
-      // 在 iPad 上，放寬顯示條件
-      // 只要有一點點 alpha 就顯示，不要等到 framesDetected 很高
-      const entryOpacity = Math.min(1, h.framesDetected / 2); // 修改：只要 2 幀就全顯
+      const entryOpacity = Math.min(1, h.framesDetected / 2);
       const finalOpacity = h.alpha * entryOpacity;
 
-      if (finalOpacity <= 0.01) return; // 修改：降低顯示門檻
+      if (finalOpacity <= 0.01) return;
       ctx.save();
       ctx.globalAlpha = finalOpacity;
       
@@ -352,9 +348,14 @@ export default function App() {
       g.addColorStop(0, h.framesMissing > 0 ? "rgba(255,255,255,0.4)" : "rgba(255,255,255,0.9)"); 
       g.addColorStop(1, "transparent");
       ctx.fillStyle = g; ctx.beginPath(); ctx.arc(h.x, h.y, glowSize, 0, Math.PI * 2); ctx.fill();
+      
       ctx.translate(h.x, h.y); 
       if (h.side === 'Left') ctx.scale(-1, 1);
-      ctx.font = `${h.framesMissing > 0 ? 60 : 80}px Arial`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      
+      // 關鍵修正：iOS 手掌 Emoji 渲染修復
+      ctx.fillStyle = '#000000';
+      ctx.font = `${h.framesMissing > 0 ? 60 : 80}px "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", Arial`; 
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText('✋', 0, 0); 
       ctx.restore();
     });
@@ -380,101 +381,55 @@ export default function App() {
       });
     }
 
-    // --- 穩定追蹤核心邏輯 ---
     const nextHands: TrackedHand[] = [];
     const usedDetections = new Set<number>();
 
-    // 1. 更新現有手掌
     trackedHandsRef.current.forEach(hand => {
-      // 預測位置
       const predX = hand.x + hand.vx * 0.8;
       const predY = hand.y + hand.vy * 0.8;
+      let bestIdx = -1; let bestDist = MAX_MATCH_DIST;
 
-      let bestIdx = -1; 
-      let bestDist = MAX_MATCH_DIST;
-
-      // 尋找最佳匹配
       detections.forEach((det, idx) => {
         if (usedDetections.has(idx)) return;
         const d = Math.sqrt(Math.pow(det.x - predX, 2) + Math.pow(det.y - predY, 2));
-        
         const sideBonus = (hand.side === det.side) ? 0.6 : 1.0; 
         const weightedDist = d * sideBonus;
-
-        if (weightedDist < bestDist) { 
-          bestDist = weightedDist; 
-          bestIdx = idx; 
-        }
+        if (weightedDist < bestDist) { bestDist = weightedDist; bestIdx = idx; }
       });
 
       if (bestIdx !== -1) {
-        // 成功匹配
         const det = detections[bestIdx]; 
         usedDetections.add(bestIdx);
-        
-        // 自適應平滑
         const moveDist = Math.sqrt(Math.pow(det.x - hand.x, 2) + Math.pow(det.y - hand.y, 2));
         const adaptiveAlpha = MIN_SMOOTHING + (Math.min(moveDist, 150) / 150) * (MAX_SMOOTHING - MIN_SMOOTHING);
-
         const smoothX = hand.x + (det.x - hand.x) * adaptiveAlpha;
         const smoothY = hand.y + (det.y - hand.y) * adaptiveAlpha;
-        
         nextHands.push({
-          ...hand, 
-          x: smoothX, 
-          y: smoothY,
-          vx: smoothX - hand.x,
-          vy: smoothY - hand.y,
-          framesMissing: 0, 
-          alpha: 1.0, 
-          framesDetected: hand.framesDetected + 1,
-          side: det.side
+          ...hand, x: smoothX, y: smoothY, vx: smoothX - hand.x, vy: smoothY - hand.y,
+          framesMissing: 0, alpha: 1.0, framesDetected: hand.framesDetected + 1, side: det.side
         });
       } else if (hand.framesMissing < PERSISTENCE_FRAMES) {
-        // 遺失追蹤
         const damping = 0.9;
-        const nextVx = hand.vx * damping;
-        const nextVy = hand.vy * damping;
-        
+        const nextVx = hand.vx * damping; const nextVy = hand.vy * damping;
         const nextFramesMissing = hand.framesMissing + 1;
-        
-        // Grace Period 
         let newAlpha = hand.alpha;
         if (nextFramesMissing > GRACE_PERIOD) {
-           // 修改：在 iPad 上降低淡出速度，避免閃爍
            newAlpha = Math.max(0, hand.alpha - 0.05); 
         }
-
         nextHands.push({
-          ...hand, 
-          x: hand.x + nextVx, 
-          y: hand.y + nextVy, 
-          vx: nextVx, 
-          vy: nextVy,
-          framesMissing: nextFramesMissing, 
-          framesDetected: hand.framesDetected,
-          alpha: newAlpha
+          ...hand, x: hand.x + nextVx, y: hand.y + nextVy, vx: nextVx, vy: nextVy,
+          framesMissing: nextFramesMissing, framesDetected: hand.framesDetected, alpha: newAlpha
         });
       }
     });
 
-    // 2. 新增手掌
     detections.forEach((det, idx) => {
       if (!usedDetections.has(idx)) {
         nextHands.push({ 
-          id: Date.now() + idx, 
-          x: det.x, 
-          y: det.y, 
-          vx: 0, 
-          vy: 0, 
-          side: det.side, 
-          alpha: 1.0, 
-          framesMissing: 0,
-          framesDetected: 1 
+          id: Date.now() + idx, x: det.x, y: det.y, vx: 0, vy: 0, side: det.side, alpha: 1.0, framesMissing: 0, framesDetected: 1 
         });
       }
     });
-
     trackedHandsRef.current = nextHands;
   }, [trackerReady]);
 
@@ -493,7 +448,6 @@ export default function App() {
     return () => { if (requestRef.current) cancelAnimationFrame(requestRef.current); audioService.stopMusic(); };
   }, [loop]);
 
-  // 如果有錯誤，顯示錯誤畫面而不是全黑
   if (errorMessage) {
       return (
           <div className="w-full h-full flex flex-col items-center justify-center bg-zinc-900 text-white p-6 text-center z-50">
@@ -509,15 +463,7 @@ export default function App() {
 
   return (
     <div className="relative w-full h-full flex items-center justify-center overflow-hidden bg-black">
-      {/* 修改：Video 標籤加入 playsInline 並設定寬高，確保 iOS 正確渲染 */}
-      <video 
-        ref={videoRef} 
-        className="absolute" 
-        style={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT, opacity: 0.001, pointerEvents: 'none' }}
-        playsInline 
-        muted 
-        autoPlay 
-      />
+      <video ref={videoRef} className="absolute" style={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT, opacity: 0.001, pointerEvents: 'none' }} playsInline muted autoPlay />
       <div className={`relative w-full h-full flex items-center justify-center ${isShaking ? 'shake-active' : ''}`}>
         <canvas ref={canvasRef} width={CANVAS_WIDTH} height={CANVAS_HEIGHT} />
       </div>
