@@ -14,6 +14,10 @@ const PERSISTENCE_FRAMES = 40;
 const MAX_MATCH_DIST = 400; 
 const GRACE_PERIOD = 8; 
 
+// 效能優化參數
+// 進一步增加間隔至 70ms (約 14 FPS)，大幅減少運算
+const TRACKING_THROTTLE_MS = 70; 
+
 // Adaptive Smoothing Parameters
 const MIN_SMOOTHING = 0.15; 
 const MAX_SMOOTHING = 0.8;  
@@ -35,6 +39,7 @@ export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const requestRef = useRef<number>(0);
   const frameCountRef = useRef(0);
+  const lastTrackingTimeRef = useRef<number>(0); // 記錄上次 AI 偵測的時間
   
   const objectsRef = useRef<GameObject[]>([]);
   const particlesRef = useRef<Particle[]>([]);
@@ -69,10 +74,12 @@ export default function App() {
     async function setup() {
       try {
         console.log("正在請求相機權限...");
+        // 效能優化：降低相機解析度請求至 360p (640x360)
+        // 這會大幅減少 MediaPipe 的處理像素，解決 Lag 問題
         const stream = await navigator.mediaDevices.getUserMedia({ 
           video: { 
-            width: { ideal: 1280 }, 
-            height: { ideal: 720 }, 
+            width: { ideal: 640 }, 
+            height: { ideal: 360 }, 
             facingMode: "user" 
           },
           audio: false 
@@ -281,25 +288,37 @@ export default function App() {
         ctx.restore();
     });
 
-    // 3. 多層次山景
+    // 3. 多層次山景 (自然風格 & 較低矮)
     ctx.save();
+    
+    // 遠景山脈 (淡綠) - 降低高度，平緩起伏
     ctx.fillStyle = "#C8E6C9"; 
-    ctx.beginPath(); ctx.moveTo(0, CANVAS_HEIGHT); ctx.lineTo(0, CANVAS_HEIGHT - 150);
-    ctx.bezierCurveTo(200, CANVAS_HEIGHT - 250, 500, CANVAS_HEIGHT - 50, 700, CANVAS_HEIGHT - 200);
-    ctx.bezierCurveTo(900, CANVAS_HEIGHT - 350, 1200, CANVAS_HEIGHT - 100, 1280, CANVAS_HEIGHT - 180);
-    ctx.lineTo(1280, CANVAS_HEIGHT); ctx.fill();
-
-    ctx.fillStyle = "#81C784";
-    ctx.beginPath(); ctx.moveTo(0, CANVAS_HEIGHT); ctx.lineTo(0, CANVAS_HEIGHT - 100);
-    ctx.bezierCurveTo(300, CANVAS_HEIGHT - 200, 600, CANVAS_HEIGHT - 150, 900, CANVAS_HEIGHT - 250);
-    ctx.bezierCurveTo(1100, CANVAS_HEIGHT - 300, 1280, CANVAS_HEIGHT - 150, 1280, CANVAS_HEIGHT);
+    ctx.beginPath(); 
+    ctx.moveTo(0, CANVAS_HEIGHT); 
+    ctx.lineTo(0, CANVAS_HEIGHT - 120);
+    ctx.bezierCurveTo(CANVAS_WIDTH * 0.25, CANVAS_HEIGHT - 180, CANVAS_WIDTH * 0.5, CANVAS_HEIGHT - 80, CANVAS_WIDTH * 0.75, CANVAS_HEIGHT - 160);
+    ctx.lineTo(CANVAS_WIDTH, CANVAS_HEIGHT - 100);
+    ctx.lineTo(CANVAS_WIDTH, CANVAS_HEIGHT); 
     ctx.fill();
 
+    // 中景丘陵 (中綠) - 更自然的圓潤線條
+    ctx.fillStyle = "#81C784";
+    ctx.beginPath(); 
+    ctx.moveTo(0, CANVAS_HEIGHT); 
+    ctx.lineTo(0, CANVAS_HEIGHT - 80);
+    ctx.bezierCurveTo(CANVAS_WIDTH * 0.2, CANVAS_HEIGHT - 150, CANVAS_WIDTH * 0.45, CANVAS_HEIGHT - 40, CANVAS_WIDTH * 0.7, CANVAS_HEIGHT - 120);
+    ctx.bezierCurveTo(CANVAS_WIDTH * 0.85, CANVAS_HEIGHT - 160, CANVAS_WIDTH * 0.95, CANVAS_HEIGHT - 80, CANVAS_WIDTH, CANVAS_HEIGHT - 90);
+    ctx.lineTo(CANVAS_WIDTH, CANVAS_HEIGHT);
+    ctx.fill();
+
+    // 近景草地 (深綠) - 壓得更低，提供開闊感
     ctx.fillStyle = "#43A047"; 
-    ctx.beginPath(); ctx.moveTo(0, CANVAS_HEIGHT); ctx.lineTo(0, CANVAS_HEIGHT - 220);
-    ctx.bezierCurveTo(300, CANVAS_HEIGHT - 380, 600, CANVAS_HEIGHT - 200, 900, CANVAS_HEIGHT - 350);
-    ctx.bezierCurveTo(1100, CANVAS_HEIGHT - 420, 1280, CANVAS_HEIGHT - 300, 1280, CANVAS_HEIGHT - 250);
-    ctx.lineTo(1280, CANVAS_HEIGHT); ctx.fill();
+    ctx.beginPath(); 
+    ctx.moveTo(0, CANVAS_HEIGHT); 
+    ctx.lineTo(0, CANVAS_HEIGHT - 40);
+    ctx.bezierCurveTo(CANVAS_WIDTH * 0.15, CANVAS_HEIGHT - 100, CANVAS_WIDTH * 0.4, CANVAS_HEIGHT - 20, CANVAS_WIDTH * 0.6, CANVAS_HEIGHT - 80);
+    ctx.bezierCurveTo(CANVAS_WIDTH * 0.8, CANVAS_HEIGHT - 120, CANVAS_WIDTH, CANVAS_HEIGHT - 50, CANVAS_WIDTH, CANVAS_HEIGHT);
+    ctx.fill();
     ctx.restore();
 
     // 4. 物件
@@ -360,14 +379,11 @@ export default function App() {
       ctx.restore();
     });
 
-    if (isPausedRef.current) {
-        ctx.save(); ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-        ctx.fillStyle = "white"; ctx.font = "bold 120px Arial"; ctx.textAlign = "center";
-        ctx.fillText("已暫停", CANVAS_WIDTH/2, CANVAS_HEIGHT/2); ctx.restore();
-    }
+    // 移除 Canvas 的暫停文字，改用 DOM Overlay
   }, []);
 
-  const processTracking = useCallback(() => {
+  // AI 偵測主邏輯 (重型運算)
+  const runDetection = useCallback(() => {
     if (!videoRef.current || !trackerReady) return;
     const res = handTrackingService.detect(videoRef.current);
     const detections: { x: number, y: number, side: 'Left' | 'Right' }[] = [];
@@ -433,15 +449,39 @@ export default function App() {
     trackedHandsRef.current = nextHands;
   }, [trackerReady]);
 
+  // 輕量物理補間 (在 AI 沒跑的幀運行)
+  const updateHandPhysics = useCallback(() => {
+    trackedHandsRef.current.forEach(hand => {
+        // 利用慣性移動手部，即使 AI 這幀沒有偵測
+        // 因為偵測間隔變長 (70ms)，這裡的慣性系數要調低，避免衝過頭
+        hand.x += hand.vx * 0.3; 
+        hand.y += hand.vy * 0.3;
+        // 增加摩擦力
+        hand.vx *= 0.8;
+        hand.vy *= 0.8;
+    });
+  }, []);
+
   const loop = useCallback(() => {
     if (!canvasRef.current || !videoRef.current) return;
     const ctx = canvasRef.current.getContext('2d');
     if (!ctx) return;
-    processTracking();
+    
+    const now = performance.now();
+    
+    // 效能優化核心：限制 AI 偵測頻率 (約 14 FPS)
+    if (now - lastTrackingTimeRef.current >= TRACKING_THROTTLE_MS) {
+        runDetection();
+        lastTrackingTimeRef.current = now;
+    } else {
+        // 在 AI 休息的幀，使用物理預測移動手部，保持 60 FPS 流暢感
+        updateHandPhysics();
+    }
+    
     updateGameLogic();
     draw(ctx);
     requestRef.current = requestAnimationFrame(loop);
-  }, [processTracking, updateGameLogic, draw]);
+  }, [runDetection, updateHandPhysics, updateGameLogic, draw]);
 
   useEffect(() => {
     requestRef.current = requestAnimationFrame(loop);
@@ -476,12 +516,29 @@ export default function App() {
               <div className="text-xl mt-1">生命: {'❤️'.repeat(gameState.lives)}</div>
             </div>
           </div>
+          {/* 右上角只保留暫停按鈕 */}
           <div className="absolute top-4 right-4 flex gap-3">
             <button onClick={togglePause} className="bg-white/40 backdrop-blur-md p-3 px-6 rounded-2xl text-white text-2xl hover:bg-white/60 active:scale-90 transition-all shadow-lg font-bold">
-                {gameState.isPaused ? '▶️ 繼續' : '⏸️ 暫停'}
+                ⏸️ 暫停
             </button>
-            <button onClick={exitGame} className="bg-white/40 backdrop-blur-md p-3 px-6 rounded-2xl text-white text-2xl hover:bg-white/60 active:scale-90 transition-all shadow-lg font-bold">🚪 退出</button>
           </div>
+          
+          {/* 新增暫停選單 Overlay */}
+          {gameState.isPaused && (
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+              <div className="bg-white/95 p-8 rounded-[40px] text-center shadow-2xl border-b-[8px] border-sky-300 max-w-sm w-full">
+                <h2 className="text-4xl font-black text-sky-600 mb-8">遊戲已暫停</h2>
+                <div className="flex flex-col gap-4">
+                    <button onClick={togglePause} className="w-full bg-sky-500 hover:bg-sky-600 text-white py-4 rounded-[20px] text-2xl font-black shadow-lg active:scale-95 transition-all">
+                        ▶️ 繼續遊戲
+                    </button>
+                    <button onClick={exitGame} className="w-full bg-red-400 hover:bg-red-500 text-white py-4 rounded-[20px] text-2xl font-black shadow-lg active:scale-95 transition-all">
+                        🚪 退出遊戲
+                    </button>
+                </div>
+              </div>
+            </div>
+          )}
         </>
       )}
 
